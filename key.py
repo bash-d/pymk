@@ -51,6 +51,13 @@ def disable_x_input():
 # 58 = mod key
 # toggle(just tap defined on both layers),tap,momentary
 # 1 = layer\function
+
+# True - when unbound key in pressed its default key will be sent
+# False - send nothing if an unbound key is pressed
+default_keys = [False,
+               True,
+]
+
 mod_keys = [{58:['momentary', 1], 54:['toggle', 1], 53:['tap', 1]},
             {53:['tap', 0]}
 ]
@@ -101,6 +108,8 @@ def callback(key):
     global mod_keys
     global last_key
     global layer_keys
+
+    global default_keys
 
     global user_press
 
@@ -169,9 +178,14 @@ def callback(key):
             keyboard.press(active_layer_keys[key.scan_code])
             user_press = False 
         else:
+            print("Keybind release")
             keyboard.release(active_layer_keys[key.scan_code])
             user_press = False 
 
+    elif default_keys[layer_state] and not [value for ke, value in layer_key_codes[layer_state].items() if key.scan_code == ke or key.scan_code == value]:
+        print(f"Broke: {key.scan_code}")
+        print(f"Broke: {layer_key_codes[layer_state]}")
+        print("Broke")
     elif key.event_type == 'down':
         keyboard.press(key.name)
         user_press = True
