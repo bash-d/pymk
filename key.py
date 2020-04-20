@@ -55,14 +55,14 @@ def disable_x_input():
 # True - when unbound key in pressed its default key will be sent
 # False - send nothing if an unbound key is pressed
 key_fallback = [True,
-                False,
+                True,
 ]
 
 mod_keys = [{58:['momentary', 1], 54:['toggle', 1], 53:['tap', 1]},
             {53:['tap', 0]}
 ]
 layer_keys = [{'tab':'esc', 'esc':'tab'},
-              {('a', 'b'):('z', 'v'), 'h':'left', 'j':'down', 'k':'up', ('shift', 'l'):'right', 'c':('alt', 'shift', 'q')}
+              {('a', 'b'):('z', 'v'), 'h':'left', 'j':'down', 'k':'up', ('ctrl', 'shift', 'l'):'right', 'c':('alt', 'shift', 'q')}
 ]
 
 # convert layer_keys to key code versions (multi key binds must be tuples)
@@ -100,7 +100,6 @@ toggle_key = None
 toggle_layer = None
 
 last_key = None
-user_press = False
 
 def first_press(last_key, key):
     if last_key.event_type == 'down' and last_key.scan_code == key.scan_code:
@@ -119,11 +118,11 @@ def key_code_bind_list(key_binds):
     return bind_list
 
 def detect_hotkey():
-    for bind in layer_key_codes[layer_state].keys():
-        if keyboard.is_pressed(bind):
-            print(f"Bind pressed: {bind}")
-            print(f"Binds: {layer_key_codes[layer_state].keys()}")
-            return bind
+    for hotkey in layer_key_codes[layer_state].keys():
+        if keyboard.is_pressed(hotkey):
+            #print(f"Bind pressed: {bind}")
+            #print(f"Binds: {layer_key_codes[layer_state].keys()}")
+            return hotkey
 
 def callback(key):
     global layer_state
@@ -141,13 +140,12 @@ def callback(key):
 
     global key_fallback
 
-    global user_press
-
     global layer_key_codes
 
     layer_mod_keys = mod_keys[layer_state]
 
-    bind_pressed = detect_hotkey()
+    hotkey_pressed = detect_hotkey()
+    
 
     if key.scan_code == momentary_key and key.event_type == 'up' and layer_state == momentary_layer:
         print(f"Momentary reverting to layer: {old_layer_state}")
@@ -203,32 +201,22 @@ def callback(key):
 
     # KEY BINDS SECTION
     # check if pressed key code is in the layer_key_codes dictionaries keys for the current layer
-    elif bind_pressed and key.event_type == 'down':
-        print(f"hotkey pressed: {key}")
-        print(f"activating: {layer_key_codes[layer_state][bind_pressed]}")
-        #keyboard.release(key.scan_code)
-        keyboard.release(last_key.scan_code)
-        keyboard.send(layer_key_codes[layer_state][bind_pressed])
+    elif hotkey_pressed and key.event_type == 'down':
+        print(f"Releasing hotkey: {hotkey_pressed}")
+        keyboard.release(hotkey_pressed)
+        print(f"activating: {layer_key_codes[layer_state][hotkey_pressed]}")
+        keyboard.send(layer_key_codes[layer_state][hotkey_pressed])
 
-    # Press default keys for undefined layer keys? 
-    elif not key_fallback[layer_state] and not key.scan_code in key_code_bind_list(layer_key_codes[layer_state].keys()) and not key.scan_code in key_code_bind_list(layer_key_codes[layer_state].values()):
-        print(f"Broke: {key.scan_code}")
-        print(f"Broke: {layer_key_codes[layer_state]}")
-        print("Broke")
+    # press default keys if key fallback is enabled for layer
+    elif key_fallback[layer_state]:
+        if key.event_type == 'down':
+            keyboard.press(key.scan_code)
+        else:
+            keyboard.release(key.scan_code)
 
-    elif key.event_type == 'down':
-        keyboard.press(key.scan_code)
-        user_press = True
-        #print("normal: {}".format(key))
-    else:
-        keyboard.release(key.scan_code)
-        user_press = True
-        #print("normal: {}".format(key))
-
-    # stores key event for last key press
+    # stores last key event as last_key
     last_key = key
     print(key, key.scan_code, key.event_type)
-    #print(f"User press: {user_press}")
 
 system = platform.system()
 if system == 'Linux':
