@@ -55,7 +55,7 @@ def disable_x_input():
 # True - when unbound key in pressed its default key will be sent
 # False - send nothing if an unbound key is pressed
 key_fallback = [True,
-                True,
+                False,
 ]
 
 mod_keys = [{58:['momentary', 1], 54:['toggle', 1], 53:['tap', 1]},
@@ -92,14 +92,6 @@ for layer in layer_keys:
     layer_key_codes.append(key_code_dict.copy())
 print(layer_key_codes)
 
-layer_state = 0
-old_layer_state = 0
-momentary_key = None
-momentary_layer = None
-toggle_key = None
-toggle_layer = None
-
-last_key = None
 
 def first_press(last_key, key):
     if last_key.event_type == 'down' and last_key.scan_code == key.scan_code:
@@ -119,10 +111,19 @@ def key_code_bind_list(key_binds):
 
 def detect_hotkey():
     for hotkey in layer_key_codes[layer_state].keys():
+        print(hotkey)
         if keyboard.is_pressed(hotkey):
-            #print(f"Bind pressed: {bind}")
-            #print(f"Binds: {layer_key_codes[layer_state].keys()}")
+            print(f"hotkey: {hotkey}")
             return hotkey
+
+layer_state = 0
+old_layer_state = 0
+momentary_key = None
+momentary_layer = None
+toggle_key = None
+toggle_layer = None
+
+last_key = None
 
 def callback(key):
     global layer_state
@@ -145,7 +146,7 @@ def callback(key):
     layer_mod_keys = mod_keys[layer_state]
 
     hotkey_pressed = detect_hotkey()
-    
+    print(f"hotkey_pressed {hotkey_pressed}")
 
     if key.scan_code == momentary_key and key.event_type == 'up' and layer_state == momentary_layer:
         print(f"Momentary reverting to layer: {old_layer_state}")
@@ -154,12 +155,11 @@ def callback(key):
         momentary_layer = None
 
     # Doesnt work with rshift as it sends 2 scan codes
-    #elif key.scan_code == toggle_key and key.event_type == 'down' and first_press(last_key, key) == True and layer_state == toggle_layer:
-    #    print(toggle_key)
-    #    print(f"TOGGLE GOING BACK TO: {old_layer_state}")
-    #    layer_state = old_layer_state
-    #    toggle_key = None
-    #    toggle_layer = None
+    elif key.scan_code == toggle_key and key.event_type == 'down' and first_press(last_key, key) and layer_state == toggle_layer:
+        print(f"Toggle reverting to layer: {old_layer_state}")
+        layer_state = old_layer_state
+        toggle_key = None
+        toggle_layer = None
     
     elif key.scan_code in layer_mod_keys.keys():
         # momentary/tap
@@ -169,29 +169,24 @@ def callback(key):
 
         # Momentary
         if mod_key_type == 'momentary':
-            if key.event_type == 'down':
+            if key.event_type == 'down' and first_press(last_key, key):
                 # only save the old layer state if key is pressed for the first time
-                if first_press(last_key, key):
-                    old_layer_state = layer_state
-
+                old_layer_state = layer_state
                 momentary_key = key.scan_code
                 momentary_layer = mod_key_layer
                 layer_state = mod_key_layer
                 print(f"Momentary switching to layer: {layer_state}")
                 print(f"Momentary original layer: {old_layer_state}")
         
-        ## Toggle
-        #elif mod_key_type == 'toggle':
-        #    if key.event_type == 'down':
-        #        if first_press(last_key, key):
-        #            old_layer_state = layer_state
-        #        
-        #            toggle_key = key.scan_code
-        #            toggle_layer = mod_key_layer
-        #            layer_state = mod_key_layer
-        #            print(f"TOGGLE layer state: {layer_state}")
-        #            print(f"TOGGLE OLD layer state: {old_layer_state}")
-
+        # Toggle
+        elif mod_key_type == 'toggle':
+            if key.event_type == 'down' and first_press(last_key, key):
+                old_layer_state = layer_state
+                toggle_key = key.scan_code
+                toggle_layer = mod_key_layer
+                layer_state = mod_key_layer
+                print(f"Toggle switching to layer: {layer_state}")
+                print(f"Toggle original layer: {old_layer_state}")
 
         # Tap
         elif mod_key_type == 'tap':
@@ -217,6 +212,7 @@ def callback(key):
     # stores last key event as last_key
     last_key = key
     print(key, key.scan_code, key.event_type)
+
 
 system = platform.system()
 if system == 'Linux':
