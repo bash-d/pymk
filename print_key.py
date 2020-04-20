@@ -2,7 +2,8 @@
 import keyboard
 
 def callback(e):
-    print(keyboard._pressed_events)
+    print(e)
+    print(e.scan_code)
 
 keyboard.hook(callback)
 keyboard.wait()
