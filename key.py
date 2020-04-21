@@ -5,6 +5,82 @@ import keyboard
 import subprocess
 import re
 import unicodedata
+from keyboard import _pressed_events, _pressed_events_lock, KEY_DOWN, KEY_UP, is_modifier
+
+# Custom function replacing keyboard/__init__.py _KeyboardListener.direct_callback
+def custom_direct_callback(self, event):
+    print("Custom")
+    """
+    This function is called for every OS keyboard event and decides if the
+    event should be blocked or not, and passes a copy of the event to
+    other, non-blocking, listeners.
+
+    There are two ways to block events: remapped keys, which translate
+    events by suppressing and re-emitting; and blocked hotkeys, which
+    suppress specific hotkeys.
+    """
+    # Pass through all fake key events, don't even report to other handlers.
+    if self.is_replaying:
+        return True
+
+    # MODIFIED PART
+    # captures keyboard events even if a hook is suppressing
+    event_type = event.event_type
+    scan_code = event.scan_code
+
+    # Update tables of currently pressed keys and modifiers.
+    with _pressed_events_lock:
+        if event_type == KEY_DOWN:
+            if is_modifier(scan_code): self.active_modifiers.add(scan_code)
+            _pressed_events[scan_code] = event
+        hotkey = tuple(sorted(_pressed_events))
+        if event_type == KEY_UP:
+            self.active_modifiers.discard(scan_code)
+            if scan_code in _pressed_events: del _pressed_events[scan_code]
+
+    if not all(hook(event) for hook in self.blocking_hooks):
+        return False
+
+    # Mappings based on individual keys instead of hotkeys.
+    for key_hook in self.blocking_keys[scan_code]:
+        if not key_hook(event):
+            return False
+
+    # Default accept.
+    accept = True
+
+    if self.blocking_hotkeys:
+        if self.filtered_modifiers[scan_code]:
+            origin = 'modifier'
+            modifiers_to_update = set([scan_code])
+        else:
+            modifiers_to_update = self.active_modifiers
+            if is_modifier(scan_code):
+                modifiers_to_update = modifiers_to_update | {scan_code}
+            callback_results = [callback(event) for callback in self.blocking_hotkeys[hotkey]]
+            if callback_results:
+                accept = all(callback_results)
+                origin = 'hotkey'
+            else:
+                origin = 'other'
+
+        for key in sorted(modifiers_to_update):
+            transition_tuple = (self.modifier_states.get(key, 'free'), event_type, origin)
+            should_press, new_accept, new_state = self.transition_table[transition_tuple]
+            if should_press: press(key)
+            if new_accept is not None: accept = new_accept
+            self.modifier_states[key] = new_state
+
+    if accept:
+        if event_type == KEY_DOWN:
+            _logically_pressed_keys[scan_code] = event
+        elif event_type == KEY_UP and scan_code in _logically_pressed_keys:
+            del _logically_pressed_keys[scan_code]
+
+    # Queue for handlers that won't block the event.
+    self.queue.put(event)
+
+    return accept
 
 def disable_x_input():
     xinput_dev = subprocess.run(['xinput', '--list'], stdout=subprocess.PIPE, text=True)
@@ -218,7 +294,10 @@ system = platform.system()
 if system == 'Linux':
     kb_id = disable_x_input()
 
-keyboard.hook(callback, suppress=False)
+# Activates keyboard monkey patch
+keyboard._KeyboardListener.direct_callback = custom_direct_callback
+
+keyboard.hook(callback, suppress=True)
 
 try:
     keyboard.wait()
