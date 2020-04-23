@@ -5,82 +5,87 @@ import keyboard
 import subprocess
 import re
 import unicodedata
-from keyboard import _pressed_events, _pressed_events_lock, KEY_DOWN, KEY_UP, is_modifier
 
-# Custom function replacing keyboard/__init__.py _KeyboardListener.direct_callback
-def custom_direct_callback(self, event):
-    print("Custom")
-    """
-    This function is called for every OS keyboard event and decides if the
-    event should be blocked or not, and passes a copy of the event to
-    other, non-blocking, listeners.
-
-    There are two ways to block events: remapped keys, which translate
-    events by suppressing and re-emitting; and blocked hotkeys, which
-    suppress specific hotkeys.
-    """
-    # Pass through all fake key events, don't even report to other handlers.
-    if self.is_replaying:
-        return True
-
-    # MODIFIED PART
-    # captures keyboard events even if a hook is suppressing
-    event_type = event.event_type
-    scan_code = event.scan_code
-
-    # Update tables of currently pressed keys and modifiers.
-    with _pressed_events_lock:
-        if event_type == KEY_DOWN:
-            if is_modifier(scan_code): self.active_modifiers.add(scan_code)
-            _pressed_events[scan_code] = event
-        hotkey = tuple(sorted(_pressed_events))
-        if event_type == KEY_UP:
-            self.active_modifiers.discard(scan_code)
-            if scan_code in _pressed_events: del _pressed_events[scan_code]
-
-    if not all(hook(event) for hook in self.blocking_hooks):
-        return False
-
-    # Mappings based on individual keys instead of hotkeys.
-    for key_hook in self.blocking_keys[scan_code]:
-        if not key_hook(event):
+def modify_listener():
+    from keyboard import _pressed_events, _pressed_events_lock, KEY_DOWN, KEY_UP, is_modifier
+    
+    # Custom function replacing keyboard/__init__.py _KeyboardListener.direct_callback
+    def custom_direct_callback(self, event):
+        print("Custom")
+        """
+        This function is called for every OS keyboard event and decides if the
+        event should be blocked or not, and passes a copy of the event to
+        other, non-blocking, listeners.
+    
+        There are two ways to block events: remapped keys, which translate
+        events by suppressing and re-emitting; and blocked hotkeys, which
+        suppress specific hotkeys.
+        """
+        # Pass through all fake key events, don't even report to other handlers.
+        if self.is_replaying:
+            return True
+    
+        # MODIFIED PART
+        # captures keyboard events even if a hook is suppressing
+        event_type = event.event_type
+        scan_code = event.scan_code
+    
+        # Update tables of currently pressed keys and modifiers.
+        with _pressed_events_lock:
+            if event_type == KEY_DOWN:
+                if is_modifier(scan_code): self.active_modifiers.add(scan_code)
+                _pressed_events[scan_code] = event
+            hotkey = tuple(sorted(_pressed_events))
+            if event_type == KEY_UP:
+                self.active_modifiers.discard(scan_code)
+                if scan_code in _pressed_events: del _pressed_events[scan_code]
+    
+        if not all(hook(event) for hook in self.blocking_hooks):
             return False
-
-    # Default accept.
-    accept = True
-
-    if self.blocking_hotkeys:
-        if self.filtered_modifiers[scan_code]:
-            origin = 'modifier'
-            modifiers_to_update = set([scan_code])
-        else:
-            modifiers_to_update = self.active_modifiers
-            if is_modifier(scan_code):
-                modifiers_to_update = modifiers_to_update | {scan_code}
-            callback_results = [callback(event) for callback in self.blocking_hotkeys[hotkey]]
-            if callback_results:
-                accept = all(callback_results)
-                origin = 'hotkey'
+    
+        # Mappings based on individual keys instead of hotkeys.
+        for key_hook in self.blocking_keys[scan_code]:
+            if not key_hook(event):
+                return False
+    
+        # Default accept.
+        accept = True
+    
+        if self.blocking_hotkeys:
+            if self.filtered_modifiers[scan_code]:
+                origin = 'modifier'
+                modifiers_to_update = set([scan_code])
             else:
-                origin = 'other'
+                modifiers_to_update = self.active_modifiers
+                if is_modifier(scan_code):
+                    modifiers_to_update = modifiers_to_update | {scan_code}
+                callback_results = [callback(event) for callback in self.blocking_hotkeys[hotkey]]
+                if callback_results:
+                    accept = all(callback_results)
+                    origin = 'hotkey'
+                else:
+                    origin = 'other'
+    
+            for key in sorted(modifiers_to_update):
+                transition_tuple = (self.modifier_states.get(key, 'free'), event_type, origin)
+                should_press, new_accept, new_state = self.transition_table[transition_tuple]
+                if should_press: press(key)
+                if new_accept is not None: accept = new_accept
+                self.modifier_states[key] = new_state
+    
+        if accept:
+            if event_type == KEY_DOWN:
+                _logically_pressed_keys[scan_code] = event
+            elif event_type == KEY_UP and scan_code in _logically_pressed_keys:
+                del _logically_pressed_keys[scan_code]
+    
+        # Queue for handlers that won't block the event.
+        self.queue.put(event)
+    
+        return accept
 
-        for key in sorted(modifiers_to_update):
-            transition_tuple = (self.modifier_states.get(key, 'free'), event_type, origin)
-            should_press, new_accept, new_state = self.transition_table[transition_tuple]
-            if should_press: press(key)
-            if new_accept is not None: accept = new_accept
-            self.modifier_states[key] = new_state
-
-    if accept:
-        if event_type == KEY_DOWN:
-            _logically_pressed_keys[scan_code] = event
-        elif event_type == KEY_UP and scan_code in _logically_pressed_keys:
-            del _logically_pressed_keys[scan_code]
-
-    # Queue for handlers that won't block the event.
-    self.queue.put(event)
-
-    return accept
+    # Activates keyboard monkey patch
+    keyboard._KeyboardListener.direct_callback = custom_direct_callback
 
 def disable_x_input():
     xinput_dev = subprocess.run(['xinput', '--list'], stdout=subprocess.PIPE, text=True)
@@ -137,13 +142,13 @@ key_fallback = [True,
 mod_keys = [{58:['momentary', 1], 54:['toggle', 1], 53:['tap', 1]},
             {53:['tap', 0]}
 ]
-layer_keys = [{'tab':'esc', 'esc':'tab'},
+hotkeys = [{'tab':'esc', 'esc':'tab'},
               {('a', 'b'):('z', 'v'), 'h':'left', 'j':'down', 'k':'up', ('ctrl', 'shift', 'l'):'right', 'c':('alt', 'shift', 'q')}
 ]
 
-# convert layer_keys to key code versions (multi key binds must be tuples)
+# convert hotkeys to key code versions (multi key binds must be tuples)
 layer_key_codes = []
-for layer in layer_keys:
+for layer in hotkeys:
     key_code_dict = {}
     for default_key, remap_key in layer.items():
         if type(default_key) is tuple:
@@ -186,54 +191,51 @@ def key_code_bind_list(key_binds):
     return bind_list
 
 def detect_hotkey():
-    for hotkey in layer_key_codes[layer_state].keys():
+    for hotkey in layer_key_codes[layer].keys():
         print(hotkey)
         if keyboard.is_pressed(hotkey):
             print(f"hotkey: {hotkey}")
             return hotkey
 
-layer_state = 0
-old_layer_state = 0
+layer = 0
+old_layer = 0
+last_key = None
 momentary_key = None
 momentary_layer = None
 toggle_key = None
 toggle_layer = None
 
-last_key = None
-
 def callback(key):
-    global layer_state
-    global old_layer_state
-    
+    global layer
+    global old_layer
+    global last_key
     global momentary_key
     global momentary_layer
-
     global toggle_key
     global toggle_layer
 
     global mod_keys
-    global last_key
-    global layer_keys
+    global hotkeys
 
     global key_fallback
 
     global layer_key_codes
 
-    layer_mod_keys = mod_keys[layer_state]
-
+    layer_mod_keys = mod_keys[layer]
     hotkey_pressed = detect_hotkey()
-    print(f"hotkey_pressed {hotkey_pressed}")
 
-    if key.scan_code == momentary_key and key.event_type == 'up' and layer_state == momentary_layer:
-        print(f"Momentary reverting to layer: {old_layer_state}")
-        layer_state = old_layer_state
+    # detect momentary release to rever to previous layer
+    if key.scan_code == momentary_key and key.event_type == 'up' and layer == momentary_layer:
+        print(f"Momentary reverting to layer: {old_layer}")
+        layer = old_layer
         momentary_key = None
         momentary_layer = None
 
     # Doesnt work with rshift as it sends 2 scan codes
-    elif key.scan_code == toggle_key and key.event_type == 'down' and first_press(last_key, key) and layer_state == toggle_layer:
-        print(f"Toggle reverting to layer: {old_layer_state}")
-        layer_state = old_layer_state
+    # detect when toggle key is pressed again to revert to previous layer
+    elif key.scan_code == toggle_key and key.event_type == 'down' and first_press(last_key, key) and layer == toggle_layer:
+        print(f"Toggle reverting to layer: {old_layer}")
+        layer = old_layer
         toggle_key = None
         toggle_layer = None
     
@@ -247,39 +249,39 @@ def callback(key):
         if mod_key_type == 'momentary':
             if key.event_type == 'down' and first_press(last_key, key):
                 # only save the old layer state if key is pressed for the first time
-                old_layer_state = layer_state
+                old_layer = layer
                 momentary_key = key.scan_code
                 momentary_layer = mod_key_layer
-                layer_state = mod_key_layer
-                print(f"Momentary switching to layer: {layer_state}")
-                print(f"Momentary original layer: {old_layer_state}")
+                layer = mod_key_layer
+                print(f"Momentary switching to layer: {layer}")
+                print(f"Momentary original layer: {old_layer}")
         
         # Toggle
         elif mod_key_type == 'toggle':
             if key.event_type == 'down' and first_press(last_key, key):
-                old_layer_state = layer_state
+                old_layer = layer
                 toggle_key = key.scan_code
                 toggle_layer = mod_key_layer
-                layer_state = mod_key_layer
-                print(f"Toggle switching to layer: {layer_state}")
-                print(f"Toggle original layer: {old_layer_state}")
+                layer = mod_key_layer
+                print(f"Toggle switching to layer: {layer}")
+                print(f"Toggle original layer: {old_layer}")
 
         # Tap
         elif mod_key_type == 'tap':
             if key.event_type == 'down' and first_press(last_key, key):
-                layer_state = mod_key_layer
-                print(f"Tap switching to layer: {layer_state}")
+                layer = mod_key_layer
+                print(f"Tap switching to layer: {layer}")
 
     # KEY BINDS SECTION
     # check if pressed key code is in the layer_key_codes dictionaries keys for the current layer
     elif hotkey_pressed and key.event_type == 'down':
         print(f"Releasing hotkey: {hotkey_pressed}")
         keyboard.release(hotkey_pressed)
-        print(f"activating: {layer_key_codes[layer_state][hotkey_pressed]}")
-        keyboard.send(layer_key_codes[layer_state][hotkey_pressed])
+        print(f"activating: {layer_key_codes[layer][hotkey_pressed]}")
+        keyboard.send(layer_key_codes[layer][hotkey_pressed])
 
     # press default keys if key fallback is enabled for layer
-    elif key_fallback[layer_state]:
+    elif key_fallback[layer]:
         if key.event_type == 'down':
             keyboard.press(key.scan_code)
         else:
@@ -293,11 +295,10 @@ def callback(key):
 system = platform.system()
 if system == 'Linux':
     kb_id = disable_x_input()
-
-# Activates keyboard monkey patch
-keyboard._KeyboardListener.direct_callback = custom_direct_callback
-
-keyboard.hook(callback, suppress=True)
+    keyboard.hook(callback, suppress=False)
+elif system == 'Windows':
+    modify_listener()
+    keyboard.hook(callback, suppress=True)
 
 try:
     keyboard.wait()
