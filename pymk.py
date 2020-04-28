@@ -143,6 +143,14 @@ key_fallback = [True,
                 False,
 ]
 
+"""
+mod keys must be keycodes to differentiate right and left duplicate keys (e.g. rshift/lshift)
+
+probably cant use keys names that correspond to specific keycodes because keycodes differ between OS
+
+config file prob has to use keycodes and only UI will be able to use key names instead
+"""
+
 mod_keys = [{58:['momentary', 1], 54:['toggle', 1], 53:['tap', 1]},
             {53:['tap', 0]}
 ]
