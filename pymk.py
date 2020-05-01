@@ -5,6 +5,7 @@ import keyboard
 import subprocess
 import re
 import unicodedata
+import configparser
 
 def modify_listener():
     from keyboard import _pressed_events, _pressed_events_lock, KEY_DOWN, KEY_UP, is_modifier
@@ -139,9 +140,9 @@ def disable_x_input():
 
 # True - when unbound key in pressed its default key will be sent
 # False - send nothing if an unbound key is pressed
-key_fallback = [True,
-                False,
-]
+#key_fallback = [True,
+#                False,
+#]
 
 """
 mod keys must be keycodes to differentiate right and left duplicate keys (e.g. rshift/lshift)
@@ -151,39 +152,93 @@ probably cant use keys names that correspond to specific keycodes because keycod
 config file prob has to use keycodes and only UI will be able to use key names instead
 """
 
-mod_keys = [{58:['momentary', 1], 54:['toggle', 1], 53:['tap', 1]},
-            {53:['tap', 0]}
-]
-hotkeys = [{'tab':'esc', 'esc':'tab'},
-              {('a', 'b'):('z', 'v'), 'h':'left', 'j':'down', 'k':'up', ('ctrl', 'shift', 'l'):'right', 'c':('alt', 'shift', 'q')}
-]
+#modkeys = [{58:['momentary', 1], 54:['toggle', 1], 53:['tap', 1]},
+#            {53:['tap', 0]}
+#]
+#hotkeys = [{'tab':'esc', 'esc':'tab'},
+#           {('a', 'b'):('z', 'v'), 'h':'left', 'j':'down', 'k':'up', ('ctrl', 'shift', 'l'):'right', 'c':('alt', 'shift', 'q')}
+#]
 
-# convert hotkeys to key code versions (multi key binds must be tuples)
-hotkeys_codes = []
-for hotkey in hotkeys:
-    key_code_dict = {}
-    for map_key, remap_key in hotkey.items():
-        if type(map_key) is tuple:
+#hotkeys = [{(15,): (1,), (1,): (15,)}, {(35,): (105,), (36,): (108,), (37,): (103,), (38,): (106,), (46,): (56, 42, 16), (30, 48): (44, 47)}]
+
+def parse_config(config_file):
+    config = configparser.ConfigParser()
+    config.read(config_file)
+    
+    key_fallback = []
+    modkeys = []
+    hotkeys = []
+    for layer in config.sections():
+        # key fallback
+        key_fallback.append(config[layer]['key_fallback'])
+
+        # modkeys
+        config_modkeys = config[layer]['modkeys'].strip().split('\n')
+        layer_modkeys = {}
+    
+        for key in config_modkeys:
+            key = key.split('=')
+            key_code = int(key[0])
+            key_action = key[1][1:].split(',')
+            key_action[1] = int(key_action[1])
+            layer_modkeys[key_code] = tuple(key_action)
+        modkeys.append(layer_modkeys)
+
+        # hotkeys    
+        config_hotkeys = config[layer]['hotkeys'].strip().split('\n')
+        layer_hotkeys = {}
+    
+        for key in config_hotkeys:
+            key = key.split('=')
+            map_key = key[0].split(',')
+            map_key = [key.strip(' ') for key in map_key]
             map_key_list = []
+    
+            remap_key = key[1].split(',')
+            remap_key = [key.strip(' ') for key in remap_key]
+            remap_key_list = []
+    
             for key in map_key:
                 key = keyboard.key_to_scan_codes(key)[0]
                 map_key_list.append(key)
             map_key = tuple(map_key_list)
-        else:
-            map_key = keyboard.key_to_scan_codes(map_key)[0]
-
-        if type(remap_key) is tuple:
-            remap_key_list = []
+    
             for key in remap_key:
                 key = keyboard.key_to_scan_codes(key)[0]
                 remap_key_list.append(key)
             remap_key = tuple(remap_key_list)
-        else:
-            remap_key = keyboard.key_to_scan_codes(remap_key)[0]
+            remap_key = keyboard.key_to_scan_codes(remap_key)
+            layer_hotkeys[map_key] = remap_key
+    
+        hotkeys.append(layer_hotkeys)
+    return key_fallback, modkeys, hotkeys
 
-        key_code_dict[map_key] = remap_key
-    hotkeys_codes.append(key_code_dict.copy())
-print(hotkeys_codes)
+# convert hotkeys to key code versions (multi key binds must be tuples)
+#hotkeys = []
+#for hotkey in hotkeys:
+#    key_code_dict = {}
+#    for map_key, remap_key in hotkey.items():
+#        if type(map_key) is tuple:
+#            map_key_list = []
+#            for key in map_key:
+#                key = keyboard.key_to_scan_codes(key)[0]
+#                map_key_list.append(key)
+#            map_key = tuple(map_key_list)
+#        else:
+#            map_key = keyboard.key_to_scan_codes(map_key)[0]
+#
+#        if type(remap_key) is tuple:
+#            remap_key_list = []
+#            for key in remap_key:
+#                key = keyboard.key_to_scan_codes(key)[0]
+#                remap_key_list.append(key)
+#            remap_key = tuple(remap_key_list)
+#        else:
+#            remap_key = keyboard.key_to_scan_codes(remap_key)[0]
+#
+#        key_code_dict[map_key] = remap_key
+#    hotkeys.append(key_code_dict.copy())
+#print(hotkeys)
 
 
 def first_press(last_key, key):
@@ -204,8 +259,8 @@ def key_code_bind_list(key_binds):
             bind_list.append(bind)
     return bind_list
 
-def detect_hotkey(hotkeys_codes):
-    for hotkey in hotkeys_codes[layer].keys():
+def detect_hotkey(hotkeys):
+    for hotkey in hotkeys[layer].keys():
         print(hotkey)
         if keyboard.is_pressed(hotkey):
             print(f"hotkey: {hotkey}")
@@ -223,16 +278,16 @@ def callback(key):
     global layer
     global last_layer
     global last_key
-    global mod_keys
+    global modkeys
     global momentary_key
     global momentary_layer
     global toggle_key
     global toggle_layer
     global key_fallback
-    global hotkeys_codes
+    global hotkeys
 
-    layer_mod_keys = mod_keys[layer]
-    hotkey_pressed = detect_hotkey(hotkeys_codes)
+    layer_modkeys = modkeys[layer]
+    hotkey_pressed = detect_hotkey(hotkeys)
 
     # detect momentary release to rever to previous layer
     if key.scan_code == momentary_key and key.event_type == 'up' and layer == momentary_layer:
@@ -249,47 +304,47 @@ def callback(key):
         toggle_key = None
         toggle_layer = None
     
-    elif key.scan_code in layer_mod_keys.keys():
+    elif key.scan_code in layer_modkeys.keys():
         # momentary/tap
-        mod_key_type = layer_mod_keys[key.scan_code][0]
+        modkey_type = layer_modkeys[key.scan_code][0]
         # layer mod key activates
-        mod_key_layer = layer_mod_keys[key.scan_code][1]
+        modkey_layer = layer_modkeys[key.scan_code][1]
 
         # Momentary
-        if mod_key_type == 'momentary':
+        if modkey_type == 'momentary':
             if key.event_type == 'down' and first_press(last_key, key):
                 # only save the old layer state if key is pressed for the first time
                 last_layer = layer
                 momentary_key = key.scan_code
-                momentary_layer = mod_key_layer
-                layer = mod_key_layer
+                momentary_layer = modkey_layer
+                layer = modkey_layer
                 print(f"Momentary switching to layer: {layer}")
                 print(f"Momentary original layer: {last_layer}")
         
         # Toggle
-        elif mod_key_type == 'toggle':
+        elif modkey_type == 'toggle':
             if key.event_type == 'down' and first_press(last_key, key):
                 last_layer = layer
                 toggle_key = key.scan_code
-                toggle_layer = mod_key_layer
-                layer = mod_key_layer
+                toggle_layer = modkey_layer
+                layer = modkey_layer
                 print(f"Toggle switching to layer: {layer}")
                 print(f"Toggle original layer: {last_layer}")
 
         # Tap
-        elif mod_key_type == 'tap':
+        elif modkey_type == 'tap':
             if key.event_type == 'down' and first_press(last_key, key):
-                layer = mod_key_layer
+                layer = modkey_layer
                 print(f"Tap switching to layer: {layer}")
 
     # KEY BINDS SECTION
-    # check if pressed key code is in the hotkeys_codes dictionaries keys for the current layer
+    # check if pressed key code is in the hotkeys dictionaries keys for the current layer
     elif hotkey_pressed and key.event_type == 'down':
         print(f"Releasing hotkey: {hotkey_pressed}")
         # release hotkeys mapped keys to ensure they are not pressed down when the remapped keys are pressed
         keyboard.release(hotkey_pressed)
-        print(f"activating: {hotkeys_codes[layer][hotkey_pressed]}")
-        keyboard.send(hotkeys_codes[layer][hotkey_pressed])
+        print(f"activating: {hotkeys[layer][hotkey_pressed]}")
+        keyboard.send(hotkeys[layer][hotkey_pressed])
 
     # press default keys if key fallback is enabled for layer
     elif key_fallback[layer]:
@@ -303,6 +358,7 @@ def callback(key):
     print(key, key.scan_code, key.event_type)
 
 
+key_fallback, modkeys, hotkeys = parse_config('config.ini')
 system = platform.system()
 if system == 'Linux':
     kb_id = disable_x_input()
