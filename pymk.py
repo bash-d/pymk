@@ -170,7 +170,10 @@ def parse_config(config_file):
     hotkeys = []
     for layer in config.sections():
         # key fallback
-        key_fallback.append(config[layer]['key_fallback'])
+        if config[layer]['key_fallback'] == 'True':
+            key_fallback.append(True)
+        else:
+            key_fallback.append(False)
 
         # modkeys
         config_modkeys = config[layer]['modkeys'].strip().split('\n')
@@ -278,7 +281,7 @@ def callback(key):
     global key_fallback
     global hotkeys
 
-    print(f"keyfallback: {key_fallback[layer]}")
+    #print(f"keyfallback: {key_fallback[layer]}")
     layer_modkeys = modkeys[layer]
     hotkey_pressed = detect_multikey(hotkeys)
 
@@ -290,11 +293,10 @@ def callback(key):
     #        multikey_list = tuple(multikey_list.keys())
     #        event_types = tuple(multikey_list.values())
 
-    print(f"codes: {multikey_list}, {last_multikey}")
+    #print(f"codes: {multikey_list}, {last_multikey}")
     # detect momentary release to rever to previous layer
     if layer == momentary_layer and not all(x in multikey_list for x in momentary_key):
         print(f"Momentary reverting to layer: {last_layer}")
-        print(all(x in multikey_list for x in momentary_key))
         layer = last_layer
         momentary_key = None
         momentary_layer = None
@@ -307,7 +309,9 @@ def callback(key):
         toggle_key = None
         toggle_layer = None
     
+    #elif (keyboard.is_pressed(a) for a in modkeys[layer].keys()):
     elif detect_multikey(modkeys):
+        print("MODKEY")
         modkey = multikey_list
         # momentary/tap
         modkey_type = layer_modkeys[modkey][0]
@@ -388,13 +392,14 @@ def callback(key):
     elif key_fallback[layer]:
         if key.event_type == 'down':
             keyboard.press(key.scan_code)
+            print(key, key.scan_code, key.event_type)
+            print(detect_multikey(modkeys))
         else:
             keyboard.release(key.scan_code)
 
     # stores last key event as last_key
     last_multikey = multikey_list
     last_key = key
-    #print(key, key.scan_code, key.event_type)
 
 
 key_fallback, modkeys, hotkeys = parse_config('config.ini')
