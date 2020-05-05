@@ -176,26 +176,39 @@ def parse_config(config_file):
         config_modkeys = config[layer]['modkeys'].strip().split('\n')
         layer_modkeys = {}
     
-        for key in config_modkeys:
-            key = key.split('=')
-            key_code = int(key[0])
-            key_action = key[1][1:].split(',')
+        for modkey in config_modkeys:
+            modkey = modkey.split('=')
+            map_key = modkey[0].split(',')
+            map_key = [x.strip(' ') for x in map_key]
+            map_key_list = []
+
+            for key in map_key:
+                try:
+                    key = keyboard.key_to_scan_codes(key)[0]
+                except: 
+                    key = keyboard.key_to_scan_codes(int(key))[0]
+                print(repr(key))
+                map_key_list.append(key)
+            map_key = tuple(map_key_list)
+            print(map_key)
+            
+            key_action = modkey[1][1:].split(',')
             key_action[1] = int(key_action[1])
-            layer_modkeys[key_code] = tuple(key_action)
+            layer_modkeys[map_key] = tuple(key_action)
         modkeys.append(layer_modkeys)
 
         # hotkeys    
         config_hotkeys = config[layer]['hotkeys'].strip().split('\n')
         layer_hotkeys = {}
     
-        for key in config_hotkeys:
-            key = key.split('=')
-            map_key = key[0].split(',')
-            map_key = [key.strip(' ') for key in map_key]
+        for hotkey in config_hotkeys:
+            hotkey = hotkey.split('=')
+            map_key = hotkey[0].split(',')
+            map_key = [x.strip(' ') for x in map_key]
             map_key_list = []
     
-            remap_key = key[1].split(',')
-            remap_key = [key.strip(' ') for key in remap_key]
+            remap_key = hotkey[1].split(',')
+            remap_key = [x.strip(' ') for x in remap_key]
             remap_key_list = []
     
             for key in map_key:
@@ -213,36 +226,14 @@ def parse_config(config_file):
         hotkeys.append(layer_hotkeys)
     return key_fallback, modkeys, hotkeys
 
-# convert hotkeys to key code versions (multi key binds must be tuples)
-#hotkeys = []
-#for hotkey in hotkeys:
-#    key_code_dict = {}
-#    for map_key, remap_key in hotkey.items():
-#        if type(map_key) is tuple:
-#            map_key_list = []
-#            for key in map_key:
-#                key = keyboard.key_to_scan_codes(key)[0]
-#                map_key_list.append(key)
-#            map_key = tuple(map_key_list)
-#        else:
-#            map_key = keyboard.key_to_scan_codes(map_key)[0]
-#
-#        if type(remap_key) is tuple:
-#            remap_key_list = []
-#            for key in remap_key:
-#                key = keyboard.key_to_scan_codes(key)[0]
-#                remap_key_list.append(key)
-#            remap_key = tuple(remap_key_list)
-#        else:
-#            remap_key = keyboard.key_to_scan_codes(remap_key)[0]
-#
-#        key_code_dict[map_key] = remap_key
-#    hotkeys.append(key_code_dict.copy())
-#print(hotkeys)
-
-
 def first_press(last_key, key):
     if last_key.event_type == 'down' and last_key.scan_code == key.scan_code:
+        return False
+    else:
+        return True
+
+def first_multipress(last_multikey, multikey):
+    if last_key.event_type == 'down' and last_multikey == multikey:
         return False
     else:
         return True
@@ -259,9 +250,8 @@ def key_code_bind_list(key_binds):
             bind_list.append(bind)
     return bind_list
 
-def detect_hotkey(hotkeys):
+def detect_multikey(hotkeys):
     for hotkey in hotkeys[layer].keys():
-        print(hotkey)
         if keyboard.is_pressed(hotkey):
             print(f"hotkey: {hotkey}")
             return hotkey
@@ -269,6 +259,7 @@ def detect_hotkey(hotkeys):
 layer = 0
 last_layer = 0
 last_key = None
+last_multikey = ()
 momentary_key = None
 momentary_layer = None
 toggle_key = None
@@ -278,6 +269,7 @@ def callback(key):
     global layer
     global last_layer
     global last_key
+    global last_multikey
     global modkeys
     global momentary_key
     global momentary_layer
@@ -286,36 +278,49 @@ def callback(key):
     global key_fallback
     global hotkeys
 
+    print(f"keyfallback: {key_fallback[layer]}")
     layer_modkeys = modkeys[layer]
-    hotkey_pressed = detect_hotkey(hotkeys)
+    hotkey_pressed = detect_multikey(hotkeys)
 
+    multikey_list = (tuple(keyboard._pressed_events.keys()))
+    #if len(multikey) > 0:
+    #    for key in multikey:
+    #        # contains scan code and event type for each keyboard event {33: 'down'}
+    #        multikey_list[key.scan_code] = key.event_type
+    #        multikey_list = tuple(multikey_list.keys())
+    #        event_types = tuple(multikey_list.values())
+
+    print(f"codes: {multikey_list}, {last_multikey}")
     # detect momentary release to rever to previous layer
-    if key.scan_code == momentary_key and key.event_type == 'up' and layer == momentary_layer:
+    if layer == momentary_layer and not all(x in multikey_list for x in momentary_key):
         print(f"Momentary reverting to layer: {last_layer}")
+        print(all(x in multikey_list for x in momentary_key))
         layer = last_layer
         momentary_key = None
         momentary_layer = None
 
     # Doesnt work with rshift as it sends 2 scan codes
     # detect when toggle key is pressed again to revert to previous layer
-    elif key.scan_code == toggle_key and key.event_type == 'down' and first_press(last_key, key) and layer == toggle_layer:
+    elif layer == toggle_layer and multikey_list == toggle_key and last_multikey != multikey_list:
         print(f"Toggle reverting to layer: {last_layer}")
         layer = last_layer
         toggle_key = None
         toggle_layer = None
     
-    elif key.scan_code in layer_modkeys.keys():
+    elif detect_multikey(modkeys):
+        modkey = multikey_list
         # momentary/tap
-        modkey_type = layer_modkeys[key.scan_code][0]
+        modkey_type = layer_modkeys[modkey][0]
         # layer mod key activates
-        modkey_layer = layer_modkeys[key.scan_code][1]
+        modkey_layer = layer_modkeys[modkey][1]
+        print(f"MODKEY:{modkey_layer}, {modkey_type}")
 
         # Momentary
         if modkey_type == 'momentary':
             if key.event_type == 'down' and first_press(last_key, key):
                 # only save the old layer state if key is pressed for the first time
                 last_layer = layer
-                momentary_key = key.scan_code
+                momentary_key = modkey
                 momentary_layer = modkey_layer
                 layer = modkey_layer
                 print(f"Momentary switching to layer: {layer}")
@@ -325,7 +330,7 @@ def callback(key):
         elif modkey_type == 'toggle':
             if key.event_type == 'down' and first_press(last_key, key):
                 last_layer = layer
-                toggle_key = key.scan_code
+                toggle_key = modkey
                 toggle_layer = modkey_layer
                 layer = modkey_layer
                 print(f"Toggle switching to layer: {layer}")
@@ -336,6 +341,39 @@ def callback(key):
             if key.event_type == 'down' and first_press(last_key, key):
                 layer = modkey_layer
                 print(f"Tap switching to layer: {layer}")
+        
+    #elif key.scan_code in layer_modkeys.keys():
+    #    # momentary/tap
+    #    modkey_type = layer_modkeys[key.scan_code][0]
+    #    # layer mod key activates
+    #    modkey_layer = layer_modkeys[key.scan_code][1]
+
+    #    # Momentary
+    #    if modkey_type == 'momentary':
+    #        if key.event_type == 'down' and first_press(last_key, key):
+    #            # only save the old layer state if key is pressed for the first time
+    #            last_layer = layer
+    #            momentary_key = key.scan_code
+    #            momentary_layer = modkey_layer
+    #            layer = modkey_layer
+    #            print(f"Momentary switching to layer: {layer}")
+    #            print(f"Momentary original layer: {last_layer}")
+    #    
+    #    # Toggle
+    #    elif modkey_type == 'toggle':
+    #        if key.event_type == 'down' and first_press(last_key, key):
+    #            last_layer = layer
+    #            toggle_key = key.scan_code
+    #            toggle_layer = modkey_layer
+    #            layer = modkey_layer
+    #            print(f"Toggle switching to layer: {layer}")
+    #            print(f"Toggle original layer: {last_layer}")
+
+    #    # Tap
+    #    elif modkey_type == 'tap':
+    #        if key.event_type == 'down' and first_press(last_key, key):
+    #            layer = modkey_layer
+    #            print(f"Tap switching to layer: {layer}")
 
     # KEY BINDS SECTION
     # check if pressed key code is in the hotkeys dictionaries keys for the current layer
@@ -354,8 +392,9 @@ def callback(key):
             keyboard.release(key.scan_code)
 
     # stores last key event as last_key
+    last_multikey = multikey_list
     last_key = key
-    print(key, key.scan_code, key.event_type)
+    #print(key, key.scan_code, key.event_type)
 
 
 key_fallback, modkeys, hotkeys = parse_config('config.ini')
