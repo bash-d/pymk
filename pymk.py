@@ -286,14 +286,8 @@ def callback(key):
     hotkey_pressed = detect_multikey(hotkeys)
 
     multikey_list = (tuple(keyboard._pressed_events.keys()))
-    #if len(multikey) > 0:
-    #    for key in multikey:
-    #        # contains scan code and event type for each keyboard event {33: 'down'}
-    #        multikey_list[key.scan_code] = key.event_type
-    #        multikey_list = tuple(multikey_list.keys())
-    #        event_types = tuple(multikey_list.values())
+    modkey = detect_multikey(modkeys)
 
-    #print(f"codes: {multikey_list}, {last_multikey}")
     # detect momentary release to rever to previous layer
     if layer == momentary_layer and not all(x in multikey_list for x in momentary_key):
         print(f"Momentary reverting to layer: {last_layer}")
@@ -303,16 +297,16 @@ def callback(key):
 
     # Doesnt work with rshift as it sends 2 scan codes
     # detect when toggle key is pressed again to revert to previous layer
-    elif layer == toggle_layer and multikey_list == toggle_key and last_multikey != multikey_list:
+    elif layer == toggle_layer and set(multikey_list) == set(toggle_key) and last_multikey != multikey_list:
         print(f"Toggle reverting to layer: {last_layer}")
         layer = last_layer
         toggle_key = None
         toggle_layer = None
     
     #elif (keyboard.is_pressed(a) for a in modkeys[layer].keys()):
-    elif detect_multikey(modkeys):
+    elif modkey:
         print("MODKEY")
-        modkey = multikey_list
+        #modkey = multikey_list
         # momentary/tap
         modkey_type = layer_modkeys[modkey][0]
         # layer mod key activates
@@ -389,11 +383,15 @@ def callback(key):
         keyboard.send(hotkeys[layer][hotkey_pressed])
 
     # press default keys if key fallback is enabled for layer
-    elif key_fallback[layer]:
+    elif key_fallback[layer] and momentary_key is None and toggle_key is None:
+        #print(f"momkey: {momentary_key}, togkey: {toggle_key}, modkey: {modkey}")
+        #if momentary_key is not None or toggle_key is not None:
+        #    break
+        # if modkey and momentary_key has a value dont press
         if key.event_type == 'down':
             keyboard.press(key.scan_code)
             print(key, key.scan_code, key.event_type)
-            print(detect_multikey(modkeys))
+            print(momentary_key)
         else:
             keyboard.release(key.scan_code)
 
